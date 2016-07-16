@@ -178,9 +178,9 @@ void RecurrentConvolutionLayer<Dtype>::set_blob_zero(Blob<Dtype>* blob) {
   }
 }
 
-#ifdef CPU_ONLY
-STUB_GPU(RecurrentConvolutionLayer);
-#endif
+// #ifdef CPU_ONLY
+// STUB_GPU(RecurrentConvolutionLayer);
+// #endif
 
 INSTANTIATE_CLASS(RecurrentConvolutionLayer);
 REGISTER_LAYER_CLASS(RecurrentConvolution);
