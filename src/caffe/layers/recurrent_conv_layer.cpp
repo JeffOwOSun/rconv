@@ -3,7 +3,32 @@
 #include "caffe/filler.hpp"
 #include "caffe/layers/recurrent_conv_layer.hpp"
 
+// for testing
+#include <iostream>
+#include <iomanip>
+
 namespace caffe {
+
+template <typename Dtype>
+void log_shape(const Blob<Dtype>* blob) {
+  LOG(INFO) << blob->shape(0) << ", " << blob->shape(1) << ", "
+	    << blob->shape(2) << ", " << blob->shape(3);
+}
+
+template <typename Dtype>
+void log_first_channel_of_blob(const Blob<Dtype>* blob) {
+  const int h = blob -> shape(2);
+  const int w = blob -> shape(3);
+  const Dtype* data = blob->cpu_data();
+
+  for (int r = 0; r < std::min(10, h); ++r) {
+    for (int c = 0; c < std::min(10, w); ++c) {
+      std::cout << std::fixed << std::setw(7) << std::setprecision(2)
+		<< data[r * w + c] << ", ";
+    }
+    std::cout << std::endl;
+  }
+}
 
 template <typename Dtype>
 void RecurrentConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
@@ -56,7 +81,7 @@ void RecurrentConvolutionLayer<Dtype>::Reshape(const vector<Blob<Dtype>*>& botto
     frame_shape_ = bottom[0]->shape();
 
     // reset history storage
-    a_tm1_.reset(new Blob<Dtype>(this->output_shape_));
+    a_tm1_.reset(new Blob<Dtype>(top[0]->shape()));
     set_blob_zero(a_tm1_.get());
 
   } else {
@@ -86,11 +111,11 @@ void RecurrentConvolutionLayer<Dtype>::compute_output_shape() {
 template <typename Dtype>
 void RecurrentConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top) {
-  const Dtype* weight = this->blobs_[0]->cpu_data();
+  LOG(INFO) << "frame index: " << get_frame_index(bottom[1]);
 
   CHECK(bottom.size() == 2) << "rconv layer takes 2 blobs (data, frame_info) as input";
-
   // z_t = conv(W_x, x) + conv(W_t * a_tm1)
+  const Dtype* weight = this->blobs_[0]->cpu_data();
   const Dtype* bottom_data = bottom[0]->cpu_data();
   Dtype* top_data = top[0]->mutable_cpu_data();
   CHECK(this->num_ == 1) << "Only support 1 image per batch";
@@ -103,6 +128,11 @@ void RecurrentConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& b
     }
   }
   // now top_data = conv(W_x, x), NEXT: add conv(W_t * a_tm1) to it
+  LOG(INFO) << "normal conv";
+  log_first_channel_of_blob(top[0]);
+  LOG(INFO) << "a_t-1";
+  log_first_channel_of_blob(a_tm1_.get());
+
   // filter is 1x1, no im2col required
   CHECK(rconv_filter_is_1x1_ == true) << "Only support 1x1 conv for t";
   CHECK(this->group_ == 1) << "Only support group = 1";
@@ -115,9 +145,23 @@ void RecurrentConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& b
 			this->num_output_, this->out_spatial_dim_, rconv_kernel_dim,
 			(Dtype)1., rconv_weight, rconv_input, (Dtype)1., top_data);
   this->forward_cpu_bias(top_data, rconv_bias);
-  // now top_data = conv(W_x, x) + conv(W_t, a_tm1), NEXT: apply ReLU and update a_t-1
+  // now top_data = z_t = conv(W_x, x) + conv(W_t, a_tm1), NEXT: apply ReLU
+  LOG(INFO) << "+t conv";
+  log_first_channel_of_blob(top[0]);
 
-  LOG(INFO) << "frame index: " << get_frame_index(bottom[1]);
+  const int relu_count = top[0]->count();
+  for (int i = 0; i < relu_count; ++i) {
+    top_data[i] = std::max(top_data[i], Dtype(0));
+  }
+  // now top_data = a_t = relu(z_t), NEXT: update a_t-1
+  log_shape<Dtype>(a_tm1_.get());
+  log_shape<Dtype>(top[0]);
+
+  CHECK(a_tm1_->shape() == top[0]->shape()) << "Shape mismatch while updating a_t";
+  a_tm1_->CopyFrom(*top[0]);
+
+  LOG(INFO) << "a_t";
+  log_first_channel_of_blob(a_tm1_.get());
 }
 
 template <typename Dtype>
