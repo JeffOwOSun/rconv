@@ -10,6 +10,11 @@
 namespace caffe {
 
 template <typename Dtype>
+inline int get_frame_index(const Blob<Dtype>* blob) {
+  return int(blob->cpu_data()[0]);
+}
+
+template <typename Dtype>
 void log_shape(const Blob<Dtype>* blob) {
   LOG(INFO) << blob->shape(0) << ", " << blob->shape(1) << ", "
 	    << blob->shape(2) << ", " << blob->shape(3);
@@ -45,6 +50,60 @@ void log_first_channel_diff_of_blob(const Blob<Dtype>* blob) {
   }
 }
 
+template <typename Dtype>
+static void rconv_identity_fill_weight(Blob<Dtype>* blob) {
+  Dtype* data = blob->mutable_cpu_data();
+  int n_filter = blob->shape(0);
+  int n_channel = blob->shape(1);
+  CHECK(n_filter == n_channel) << "Input channel should be equal to output channel";
+
+  for (int i = 0; i < blob->count(); ++i) {
+    data[i] = Dtype(0);
+  }
+  // TODO: make sure this is identity
+  for (int i = 0; i < n_filter; ++i) {
+    int offset = blob->offset(i, i, 0, 0);
+    data[offset] = Dtype(1);
+  }
+}
+
+template <typename Dtype>
+static void set_blob_constant(Blob<Dtype>* blob, Dtype val) {
+  Dtype* data = blob->mutable_cpu_data();
+  for (int i = 0; i < blob->count(); ++i) {
+    data[i] = val;
+  }
+}
+
+template <typename Dtype>
+static Blob<Dtype>* rconv_backward_relu(const Blob<Dtype>* top,
+					const Blob<Dtype>* bottom)
+{
+  CHECK(top->shape() == bottom->shape()) << "Shape mismatch";
+  const Dtype* bottom_data = bottom->cpu_data();
+  const Dtype* top_diff = top->cpu_diff();
+  Blob<Dtype>* back_relu_top(new Blob<Dtype>(top->shape()));
+  Dtype* back_relu_top_diff = back_relu_top->mutable_cpu_diff();
+
+  for (int i = 0; i < top->count(); ++i) {
+    back_relu_top_diff[i] = top_diff[i] * Dtype(bottom_data[i] > 0);
+  }
+  return back_relu_top;
+}
+
+template <typename Dtype>
+static Blob<Dtype>* rconv_relu_mask(const Blob<Dtype>* bottom)
+{
+  Blob<Dtype>* relu_mask(new Blob<Dtype>(bottom->shape()));
+  Dtype* relu_mask_diff = relu_mask->mutable_cpu_diff();
+  const Dtype* bottom_data = bottom->cpu_data();
+
+  for (int i = 0; i < bottom->count(); ++i) {
+    relu_mask_diff[i] = Dtype(bottom_data[i] > 0);
+  }
+  return relu_mask;
+}
+
 
 template <typename Dtype>
 void RecurrentConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bottom,
@@ -60,7 +119,7 @@ void RecurrentConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bo
   LOG(INFO) << "Initializing recurrent conv weight & bias";
   vector<int> rconv_bias_shape(1, this->num_output_);
   vector<int> rconv_weight_shape(2, this->num_output_);
-  CHECK(this->num_spatial_axes_ == 2) << "Just for fun";
+  CHECK(this->num_spatial_axes_ == 2) << "Should be 2d conv";
   rconv_filter_is_1x1_ = true;
   for (int i = 0; i < this->num_spatial_axes_; ++i) {
     rconv_weight_shape.push_back(1);
@@ -70,12 +129,8 @@ void RecurrentConvolutionLayer<Dtype>::LayerSetUp(const vector<Blob<Dtype>*>& bo
   // fill the weight similarly to iRNN but in conv manner
   rconv_identity_fill_weight(rconv_blobs_[0].get());
 
+  //TODO: de-comment this
   this->blobs_.push_back(rconv_blobs_[0]);
-  // copy rconv_blobs out to this->blobs_ for testing
-//   CHECK(this->blobs_.size() == 2) << "Use bias term while testing";
-//   this->blobs_.resize(4);
-//   this->blobs_[2].reset(new Blob<Dtype>(rconv_weight_shape));
-//   this->blobs_[2]->CopyFrom(*rconv_blobs_[0].get());
 }
 
 template <typename Dtype>
@@ -181,8 +236,6 @@ void RecurrentConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& b
 			(Dtype)1., rconv_weight, rconv_input, (Dtype)1., top_data);
   push_back_history(top[0], z_ts_);
   // top_data = z_t = conv(W_x, x) + conv(W_t, a_tm1), NEXT: append z_t, apply ReLU
-  LOG(INFO) << "+t conv";
-  log_first_channel_of_blob(top[0]);
 
   const int relu_count = top[0]->count();
   for (int i = 0; i < relu_count; ++i) {
@@ -190,13 +243,15 @@ void RecurrentConvolutionLayer<Dtype>::Forward_cpu(const vector<Blob<Dtype>*>& b
   }
   push_back_history(top[0], a_ts_);
   // now top_data = a_t = relu(z_t)
+  LOG(INFO) << "a_t";
+  log_first_channel_of_blob(a_ts_.back().get());
 
   // check length of history
   CHECK(a_ts_.size() == z_ts_.size()) << "history mismatch";
   CHECK(a_ts_.size() == a_lm1_ts_.size()) << "history mismatch";
-
-  LOG(INFO) << "a_t";
-  log_first_channel_of_blob(a_ts_.back().get());
+//   CHECK(a_ts_.size() == get_frame_index(bottom[1])+2)
+//     << "hisroty-frame_index mismatch; "
+//     << a_ts_.size() << " vs " << get_frame_index(bottom[1]);
 }
 
 template <typename Dtype>
@@ -249,34 +304,6 @@ void RecurrentConvolutionLayer<Dtype>::Backward_cpu(const vector<Blob<Dtype>*>& 
   delete back_relu_top;
 }
 
-template <typename Dtype>
-static Blob<Dtype>* rconv_backward_relu(const Blob<Dtype>* top,
-					const Blob<Dtype>* bottom)
-{
-  CHECK(top->shape() == bottom->shape()) << "Shape mismatch";
-  const Dtype* bottom_data = bottom->cpu_data();
-  const Dtype* top_diff = top->cpu_diff();
-  Blob<Dtype>* back_relu_top(new Blob<Dtype>(top->shape()));
-  Dtype* back_relu_top_diff = back_relu_top->mutable_cpu_diff();
-
-  for (int i = 0; i < top->count(); ++i) {
-    back_relu_top_diff[i] = top_diff[i] * Dtype(bottom_data[i] > 0);
-  }
-  return back_relu_top;
-}
-
-template <typename Dtype>
-static Blob<Dtype>* rconv_relu_mask(const Blob<Dtype>* bottom)
-{
-  Blob<Dtype>* relu_mask(new Blob<Dtype>(bottom->shape()));
-  Dtype* relu_mask_diff = relu_mask->mutable_cpu_diff();
-  const Dtype* bottom_data = bottom->cpu_data();
-
-  for (int i = 0; i < bottom->count(); ++i) {
-    relu_mask_diff[i] = Dtype(bottom_data[i] > 0);
-  }
-  return relu_mask;
-}
 
 template <typename Dtype>
 static void rconv_update_dt_acc(const Blob<Dtype>* W_h,
@@ -286,8 +313,8 @@ static void rconv_update_dt_acc(const Blob<Dtype>* W_h,
   const Blob<Dtype>* const relu_mask = rconv_relu_mask(z_t);
   Blob<Dtype>* new_dt_acc(new Blob<Dtype>(dt_acc->shape()));
 
-  log_shape(W_h);
-  log_shape(dt_acc);
+//   log_shape(W_h);
+//   log_shape(dt_acc);
 
   const int output_channel = W_h->count(1);
   const int kernel_dim = W_h->shape(0); // W_h will be transposed
@@ -299,11 +326,13 @@ static void rconv_update_dt_acc(const Blob<Dtype>* W_h,
 			(Dtype)1., W_h->cpu_data(), dt_acc->cpu_diff(),
 			(Dtype)0., new_dt_acc->mutable_cpu_diff());
 
-  CHECK(relu_mask->count() == new_dt_acc->count()) << "Shape mismatch";
-  LOG(INFO) << "mask_shape";
-  log_shape(relu_mask);
-  LOG(INFO) << "conv(W_h_trans, dt_acc) shape";
-  log_shape(new_dt_acc);
+  LOG(INFO) << "new_dt_acc";
+  log_first_channel_diff_of_blob(new_dt_acc);
+//   CHECK(relu_mask->count() == new_dt_acc->count()) << "Shape mismatch";
+//   LOG(INFO) << "mask_shape";
+//   log_shape(relu_mask);
+//   LOG(INFO) << "conv(W_h_trans, dt_acc) shape";
+//   log_shape(new_dt_acc);
 
   caffe_mul(new_dt_acc->count(), relu_mask->cpu_diff(), new_dt_acc->cpu_diff(),
  	    new_dt_acc->mutable_cpu_diff());
@@ -318,15 +347,13 @@ void RecurrentConvolutionLayer<Dtype>::rconv_backward_cpu(const Blob<Dtype>* top
 							  Dtype* const Wa_diff,
 							  Dtype* const Wh_diff) {
   Blob<Dtype>* dt_acc(new Blob<Dtype>(top->shape())); // !!!delete this!!!
-  log_shape(top);
-  log_shape(dt_acc);
   dt_acc->CopyFrom(*top, true);
 
+  LOG(INFO) << "top diff";
+  log_first_channel_diff_of_blob(top);
+
   for (int t = a_ts_.size()-1; t > 0; --t) {
-    LOG(INFO) << "t = " << t;
-    LOG(INFO) << "top diff";
-    log_first_channel_diff_of_blob(top);
-    LOG(INFO) << ", dt_acc_diff";
+    LOG(INFO) << "t = " << t << ", dt_acc_diff";
     log_first_channel_diff_of_blob(dt_acc);
 
     const Blob<Dtype>* const a_lm1_t = a_lm1_ts_[t].get(); // don't delete this
@@ -340,14 +367,10 @@ void RecurrentConvolutionLayer<Dtype>::rconv_backward_cpu(const Blob<Dtype>* top
       const int kernel_dim = dt_acc->count(2);
       const int output_spatial = a_tm1->shape(1); // a_tm1 will be transpose
 
-      LOG(INFO) << "look at these fucking stuff";
-      log_shape(dt_acc);
-      log_shape(a_tm1);
+//       log_shape(dt_acc);
+//       log_shape(a_tm1);
       LOG(INFO) << "in backward: M, N, K: " << output_channel << ", "
 		<< output_spatial << ", " << kernel_dim;
-
-      CHECK(dt_acc->shape(2) == a_tm1->shape(2));
-      LOG(INFO) << "omg i am called";
       caffe_cpu_gemm<Dtype>(CblasNoTrans, CblasTrans,
 			    output_channel, output_spatial, kernel_dim,
 			    (Dtype)1., dt_acc->cpu_diff(), a_tm1->cpu_data(),
@@ -358,32 +381,6 @@ void RecurrentConvolutionLayer<Dtype>::rconv_backward_cpu(const Blob<Dtype>* top
     rconv_update_dt_acc(rconv_blobs_[0].get(), z_tm1, dt_acc);
   }
   delete dt_acc;
-}
-
-
-template <typename Dtype>
-void RecurrentConvolutionLayer<Dtype>::rconv_identity_fill_weight(Blob<Dtype>* blob) {
-  Dtype* data = blob->mutable_cpu_data();
-  int n_filter = blob->shape(0);
-  int n_channel = blob->shape(1);
-  CHECK(n_filter == n_channel) << "Input channel should be equal to output channel";
-
-  for (int i = 0; i < blob->count(); ++i) {
-    data[i] = Dtype(0);
-  }
-  // TODO: make sure this is identity
-  for (int i = 0; i < n_filter; ++i) {
-    int offset = blob->offset(i, i, 0, 0);
-    data[offset] = Dtype(1);
-  }
-}
-
-template <typename Dtype>
-static void set_blob_constant(Blob<Dtype>* blob, Dtype val) {
-  Dtype* data = blob->mutable_cpu_data();
-  for (int i = 0; i < blob->count(); ++i) {
-    data[i] = val;
-  }
 }
 
 // #ifdef CPU_ONLY

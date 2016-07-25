@@ -99,12 +99,6 @@ private:
 
   void rconv_backward_cpu(const Blob<Dtype>* top_diff,
 			 Dtype* Wa_diff, Dtype* Wh_diff);
-  // this should not be member func
-  void rconv_identity_fill_weight(Blob<Dtype>* blob);
-  // void set_blob_zero(Blob<Dtype>* blob); // this should not be member func
-  inline int get_frame_index(const Blob<Dtype>* blob) const 
-  { return int(blob->cpu_data()[0]); }
-
 };
 
 }  // namespace caffe

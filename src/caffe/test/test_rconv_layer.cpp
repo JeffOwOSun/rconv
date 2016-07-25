@@ -14,7 +14,6 @@
 #include "caffe/test/test_caffe_main.hpp"
 #include "caffe/test/test_gradient_check_util.hpp"
 
-
 namespace caffe {
 
 template <typename TypeParam>
@@ -73,7 +72,7 @@ TYPED_TEST(RecurrentConvolutionLayerTest, TestSetup) {
 
   shared_ptr<Layer<Dtype> > layer(new RecurrentConvolutionLayer<Dtype>(layer_param));
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  EXPECT_EQ(this->blob_top_->num(), 2);
+  EXPECT_EQ(this->blob_top_->num(), 1);
   EXPECT_EQ(this->blob_top_->channels(), 4);
   EXPECT_EQ(this->blob_top_->height(), 2);
   EXPECT_EQ(this->blob_top_->width(), 1);
@@ -82,7 +81,7 @@ TYPED_TEST(RecurrentConvolutionLayerTest, TestSetup) {
   convolution_param->set_num_output(3);
   layer.reset(new RecurrentConvolutionLayer<Dtype>(layer_param));
   layer->SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
-  EXPECT_EQ(this->blob_top_->num(), 2);
+  EXPECT_EQ(this->blob_top_->num(), 1);
   EXPECT_EQ(this->blob_top_->channels(), 3);
   EXPECT_EQ(this->blob_top_->height(), 2);
   EXPECT_EQ(this->blob_top_->width(), 1);
@@ -100,11 +99,19 @@ TYPED_TEST(RecurrentConvolutionLayerTest, TestGradient) {
   convolution_param->mutable_weight_filler()->set_type("gaussian");
 
   RecurrentConvolutionLayer<Dtype> layer(layer_param);
+  layer.SetUp(this->blob_bottom_vec_, this->blob_top_vec_);
   GradientChecker<Dtype> checker(1e-2, 1e-3);
-  checker.CheckGradientExhaustive(&layer,
-				  this->blob_bottom_vec_,
-				  this->blob_top_vec_);
-}
+  //  layer.Forward(this->blob_bottom_vec_, this->blob_top_vec_);
+  //  this->frame_idx_->mutable_cpu_data()[0] = 1;
+  checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_,
+				  this->blob_top_vec_, 0);
 
+//   checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_, this->blob_top_vec_);
+//   this->frame_idx_->mutable_cpu_data()[0] = 2;
+//   checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_, this->blob_top_vec_);
+//   this->frame_idx_->mutable_cpu_data()[0] = 3;
+//   checker.CheckGradientExhaustive(&layer, this->blob_bottom_vec_, this->blob_top_vec_);
+
+}
 
 }  // namespace caffe

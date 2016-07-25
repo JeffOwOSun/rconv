@@ -32,8 +32,10 @@ class GradientChecker {
   // stored in the layer parameters and the blobs are unchanged.
   void CheckGradient(Layer<Dtype>* layer, const vector<Blob<Dtype>*>& bottom,
       const vector<Blob<Dtype>*>& top, int check_bottom = -1) {
+    if (layer->type() != "Recurrent Convolution") {
       layer->SetUp(bottom, top);
-      CheckGradientSingle(layer, bottom, top, check_bottom, -1, -1);
+    }
+    CheckGradientSingle(layer, bottom, top, check_bottom, -1, -1);
   }
   void CheckGradientExhaustive(Layer<Dtype>* layer,
       const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top,
@@ -190,7 +192,9 @@ template <typename Dtype>
 void GradientChecker<Dtype>::CheckGradientExhaustive(Layer<Dtype>* layer,
     const vector<Blob<Dtype>*>& bottom, const vector<Blob<Dtype>*>& top,
     int check_bottom) {
-  layer->SetUp(bottom, top);
+  if (layer->type() != "Recurrent Convolution") {
+    layer->SetUp(bottom, top);
+  }
   CHECK_GT(top.size(), 0) << "Exhaustive mode requires at least one top blob.";
   // LOG(ERROR) << "Exhaustive Mode.";
   for (int i = 0; i < top.size(); ++i) {
