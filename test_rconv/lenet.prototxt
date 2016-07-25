@@ -5,6 +5,7 @@ layer {
   type: "Python"
   top: "data"
   top: "frame_info"
+  top: "label"
   python_param {
     module: 'video_data_layer.layer'
     layer: 'DataLayer'
@@ -56,19 +57,20 @@ layer {
   param {
     lr_mult: 1
   }
-  param {
-    lr_mult: 2
-  }
+#   param {
+#     lr_mult: 2
+#   }
   convolution_param {
-    num_output: 20
+    num_output: 10
     kernel_size: 5
     stride: 1
+    bias_term: false
     weight_filler {
       type: "xavier"
     }
-    bias_filler {
-      type: "constant"
-    }
+#     bias_filler {
+#       type: "constant"
+#     }
   }
 }
 layer {
@@ -133,8 +135,19 @@ layer {
   }
 }
 layer {
-  name: "prob"
-  type: "Softmax"
+  name: "accuracy"
+  type: "Accuracy"
   bottom: "ip2"
-  top: "prob"
+  bottom: "label"
+  top: "accuracy"
+  include {
+    phase: TEST
+  }
+}
+layer {
+  name: "loss"
+  type: "SoftmaxWithLoss"
+  bottom: "ip2"
+  bottom: "label"
+  top: "loss"
 }
