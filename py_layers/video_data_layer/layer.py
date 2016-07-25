@@ -13,7 +13,7 @@ class DataLayer(caffe.Layer):
         data = self._compute_next_frame_blob()
         top[0].reshape(*(data.shape))
         top[1].reshape(1,)
-
+        top[2].reshape(1,)
         print '>>>>Setting Up'
 
     def forward(self, bottom, top):
@@ -27,6 +27,7 @@ class DataLayer(caffe.Layer):
         top[1].reshape(*(frame_info.shape))
         top[1].data[...] = frame_info.astype(np.float32, copy=False)
 
+        top[2].data[...] = np.array([5])
 
     def backward(self, top, propagat_down, bottom):
         """This layer does not propagate gradients."""
