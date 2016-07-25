@@ -88,15 +88,20 @@ class RecurrentConvolutionLayer : public BaseConvolutionLayer<Dtype> {
 
 private:
   vector<shared_ptr<Blob<Dtype> > > rconv_blobs_;
-  // output of previous frame
-  shared_ptr<Blob<Dtype> > a_tm1_; // t-1
+  // output of previous frames
+  vector<shared_ptr<Blob<Dtype> > > a_ts_; // history of output
+  vector<shared_ptr<Blob<Dtype> > > z_ts_; // history of pre-relu output
+  vector<shared_ptr<Blob<Dtype> > > a_lm1_ts_; // history of input
+
   bool rconv_filter_is_1x1_;
-  // vector<int> rconv_weight_shape_;
   vector<int> frame_shape_;
 
-  //virtual void Fill(Blob<Dtype>* blob) = 0;
-  void rconv_identity_fill_weight(Blob<Dtype>* blob); // this should not be member func
-  void set_blob_zero(Blob<Dtype>* blob); // this should not be member func
+
+  void rconv_backward_cpu(const Blob<Dtype>* top_diff,
+			 Dtype* Wa_diff, Dtype* Wh_diff);
+  // this should not be member func
+  void rconv_identity_fill_weight(Blob<Dtype>* blob);
+  // void set_blob_zero(Blob<Dtype>* blob); // this should not be member func
   inline int get_frame_index(const Blob<Dtype>* blob) const 
   { return int(blob->cpu_data()[0]); }
 
